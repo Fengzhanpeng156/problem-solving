@@ -11,3 +11,13 @@ export PATH=/usr/local/arm/gcc-linaro-4.9.4-2017.01-x86_64_arm-linux-gnueabihf/b
 ```bash
 source ~/.bashrc
 ```
+
+
+
+**问题描述**
+
+WSL下无法挂载物理意义上的U盘，fdisk找不到
+
+
+
+https://learn.microsoft.com/zh-cn/windows/wsl/connect-usb
