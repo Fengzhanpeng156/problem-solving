@@ -193,3 +193,205 @@ make: *** [Makefile:11：kernel_modules] 错误 2
 重新编译内核
 ```
 
+
+
+# 添加LED设备树
+
+## 修改设备树文件
+
+修改设备节点最好添加到好区分的地方
+
+一级节点
+
+```c
+/* 自定义节点 */
+	alphaled {
+		#address-cells = <1>;
+		#size-cells	= <1>;
+		status = "okay";
+		/* 
+		#define CCM_CCGR1_BASE			(0X020C406C)
+		#define SW_MUX_GPIO1_IO03_BASE	(0X020E0068)
+		#define SW_PAD_GPIO1_IO03_BASE	(0X020E02F4)
+		#define GPIO1_DR_BASE			(0X0209C000)
+		#define GPIO1_GDIR_BASE		(0X0209C004)
+
+		 */
+		reg = < 0X020C406C 0x04 
+				0X020E0068 0x04
+				0X020E02F4 0x04
+				0X0209C000 0x04
+				0X0209C004 0x04 >;
+
+	};
+```
+
+
+
+## 构建驱动文件
+
+设备结构体
+
+```c
+struct dtsled_dev{
+    dev_t devid;
+	struct cdev cdev;
+	struct class *class;
+	struct device *device;
+	int major;
+	int minor;
+};
+
+struct dtsled_dev dtsled;
+```
+
+设备操作函数
+
+```c
+// 静态函数，用于打开设备文件
+static int dtsled_open(struct inode *inode, struct file *filp){
+    // 将设备结构体指针赋值给文件指针的私有数据
+    filp->private_data = &dtsled;
+	return 0;
+};
+
+// 静态函数，用于释放dtsled设备
+static int dtsled_release(struct inode *inode, struct file *filp){
+    // 将filp->private_data转换为dtsled_dev结构体指针
+    struct dtsled_dev *dev = (struct dtsled_dev*)filp->private_data;
+	// 返回0，表示成功
+	return 0;
+};
+
+static ssize_t dtsled_write(struct file *filp, const char __user *buf, size_t count, loff_t *ppos){
+    // 将filp->private_data转换为dtsled_dev结构体指针
+    struct dtsled_dev *dev = (struct dtsled_dev*)filp->private_data;
+    // 将用户空间的数据拷贝到内核空间
+    
+	return 0;
+};
+
+
+
+/* dtsled设备操作函数 */
+static const struct file_operations dtsled_fops = {
+	.owner = THIS_MODULE,
+	.write = dtsled_write,
+	.open = dtsled_open,
+	.release = dtsled_release,
+};
+```
+
+初始化入口
+
+```c
+/* ENTRY */
+// 静态初始化函数，用于初始化dtsled模块
+static int __init dtsled_init(void){
+	
+	int ret = 0;
+	/* 注册字符设备 */
+	/* 申请设备号 */
+	dtsled.major = 0;
+	if(dtsled.major){
+		dtsled.devid = MKDEV(dtsled.major, 0);
+		ret = register_chrdev_region(dtsled.devid, DTSLED_CNT, DTSLED_NAME);
+	}else{
+		ret = alloc_chrdev_region(&dtsled.devid, 0, DTSLED_CNT, DTSLED_NAME);
+		dtsled.major = MAJOR(dtsled.devid);
+		dtsled.minor = MINOR(dtsled.devid);
+	}
+	if(ret < 0){
+		pr_err("can't register char device region.\n");
+		goto fail;
+	}
+
+	/* 添加字符设备 */
+	dtsled.cdev.owner = THIS_MODULE;
+	cdev_init(&dtsled.cdev, &dtsled_fops);
+	ret = cdev_add(&dtsled.cdev, dtsled.devid, DTSLED_CNT);
+	if(ret < 0){
+		pr_err("can't add char device.\n");
+		goto fail_cdev;
+	}
+	/* 自动创建设备节点 */
+	dtsled.class = class_create(THIS_MODULE, DTSLED_NAME);
+	if(IS_ERR(dtsled.class)){
+		pr_err("can't create class for device.\n");
+		goto fail_class;
+
+	};
+
+
+	dtsled.device = device_create(dtsled.class, NULL, dtsled.devid, NULL, DTSLED_NAME);
+	if(IS_ERR(dtsled.device)){
+		pr_err("can't create device.\n");
+		goto fail_device;
+	};
+
+	return 0;
+
+
+
+fail_device:
+	class_destroy(dtsled.class);
+fail_class:
+	cdev_del(&dtsled.cdev);
+fail_cdev:
+	unregister_chrdev_region(dtsled.devid, DTSLED_CNT);
+fail:
+	return ret ;
+
+} ;
+```
+
+获取设备树属性
+
+```c
+/* 获取设备树属性内容 */
+
+	dtsled.nd = of_find_node_by_path("/alphaled");
+	if(dtsled.nd == NULL){
+		ret = -EINVAL;
+		goto fail_findnd;
+	};
+
+	/*  */
+	ret = of_property_read_string(dtsled.nd, "status", &str);
+	if(ret < 0){
+		goto fail_findrs;
+	}else{
+		printk("status = %s\r\n",str);
+	}
+
+	ret = of_property_read_string(dtsled.nd, "compatible", &str);
+	if(ret < 0){
+		goto fail_findrs;
+	}else{
+		printk("compatible = %s\r\n",str);
+	}
+	ret = of_property_read_u32_array(dtsled.nd, "reg", regdata, 10);
+	if(ret < 0){
+		goto fail_findrs;
+	}else{
+		for( i = 0; i < 10; i++){
+			printk("reg = %x  ",regdata[i]);
+		}
+		printk("\r\n");
+	};
+
+```
+
+**结果**
+
+```bash
+
+/ # cd /lib/modules/4.1.15/
+/lib/modules/4.1.15 # depmod
+/lib/modules/4.1.15 # modprobe dtsled.ko
+status = okay
+compatible = alientek, alphaled
+reg = 20c406c  reg = 4  reg = 20e0068  reg = 4  reg = 20e02f4  reg = 4  reg = 209c000  reg = 4  reg = 209c004  reg = 4
+
+```
+
